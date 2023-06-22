@@ -1,0 +1,17 @@
+module.exports.userService = require("./user.service");
+module.exports.tokenService = require("./token.service");
+module.exports.emailService = require("./email.service");
+module.exports.authService = require("./auth.service");
+module.exports.categoryService = require("./category.service");
+module.exports.followService = require("./follow.service");
+module.exports.contactService = require("./contact.service");
+module.exports.pricingService = require("./pricingCategory.service");
+module.exports.mediaService = require("./media.service");
+module.exports.reviewService = require("./review.service");
+module.exports.locationService = require("./location.service");
+module.exports.tableService = require("./tablecolumns.service");
+module.exports.productsService = require("./products.service");
+module.exports.shippingService = require("./shipping.service");
+module.exports.competitionService = require("./competition.service");
+module.exports.competitionProductsService = require("./competitionProducts.service");
+module.exports.integrationService = require("./integration.service");
