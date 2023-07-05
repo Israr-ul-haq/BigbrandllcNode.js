@@ -8,7 +8,8 @@ const { resolve } = require("path");
 const { page } = require("../utils/customLabels");
 const { response } = require("express");
 const { request } = require("http");
-const { Products } = require("../models");
+const { Products, ShippingRules } = require("../models");
+const { calculateNetPrice } = require("../services/Calculations/NetCostCal");
 
 const domain = "akeneo.bigbrandsllc.co";
 const data = JSON.stringify({
@@ -135,23 +136,6 @@ const getProduct = catchAsync(async (request, response) => {
       page++;
     } while (items.length < totalCount);
 
-    // Create an array of promises for downloading images
-    const downloadImageAsync = (url, file) => {
-      return new Promise((resolve, reject) => {
-        https
-          .get(url, (response) => {
-            response.pipe(file);
-            file.on("finish", () => {
-              file.close(resolve);
-            });
-          })
-          .on("error", (err) => {
-            fs.unlinkSync(file);
-            reject(err);
-          });
-      });
-    };
-
     const getPathParts = async (el) => {
       const { values } = el;
       const { Image_1 } = values;
@@ -159,22 +143,7 @@ const getProduct = catchAsync(async (request, response) => {
       if (Image_1 !== undefined && Image_1 != null && Image_1.length) {
         const { data } = Image_1[0];
         const imageUrl = `https://akeneo.bigbrandsllc.co/media/cache/thumbnail_small/${data}`;
-        const imageResUrl = `/media/cache/thumbnail_small/${data}`;
-        const filePath = imageUrl;
-        var pathParts = path.parse(filePath);
 
-        // Download image if it doesn't exist in local storage
-
-        // const imagePath = `./src/public/image/${pathParts?.base}`;
-        // if (fs.existsSync(imagePath)) {
-        //   console.log(`Image already exists for ${el?.identifier}`);
-        // } else {
-        //   const file = fs.createWriteStream(
-        //     `./src/public/image/${pathParts?.base}`
-        //   );
-        //   await downloadImageAsync(imageUrl, file); // wait for image download to complete
-        //   console.log(`Image downloaded for ${el?.identifier}`);
-        // }
         return imageUrl; // Return the full image URL
       } else {
         return null;
@@ -182,6 +151,7 @@ const getProduct = catchAsync(async (request, response) => {
     };
 
     const existingProducts = await Products.find();
+    const shippingRules = await ShippingRules.find();
 
     const productsToInsert = [];
     for (let i = 0; i < items.length; i++) {
@@ -240,27 +210,43 @@ const getProduct = catchAsync(async (request, response) => {
         const updatedProduct = {
           ...existingProduct, // Keep the existing fields unchanged
           image: `${pathParts}`,
-          Product_Name: el?.values?.Product_Name?.[0]?.data || "",
-          SKU: el?.identifier || "",
-          Brand: el?.values?.Brand?.[0]?.data || "",
-          Product_Type: el?.values?.Product_Type?.[0]?.data || "",
-          Shipping_Method: el?.values?.Shipping_Method?.[0]?.data || "",
-          Shipping_Weight: el?.values?.Shipping_Weight?.[0]?.data || "",
-          Shipping_Width: el?.values?.Shipping_Width?.[0]?.data || "",
-          Shipping_Depth: el?.values?.Shipping_Depth?.[0]?.data || "",
-          Freight_Class: el?.values?.Freight_Class?.[0]?.data || "",
+          Product_Name:
+            el?.values?.Product_Name?.[0]?.data || existingProduct.Product_Name,
+          SKU: el?.identifier || existingProduct.SKU,
+          Brand: el?.values?.Brand?.[0]?.data || existingProduct.Brand,
+          Product_Type:
+            el?.values?.Product_Type?.[0]?.data || existingProduct.Product_Type,
+          Shipping_Method:
+            el?.values?.Shipping_Method?.[0]?.data ||
+            existingProduct.Shipping_Method,
+          Shipping_Weight:
+            el?.values?.Shipping_Weight?.[0]?.data ||
+            existingProduct.Shipping_Weight,
+          Shipping_Width:
+            el?.values?.Shipping_Width?.[0]?.data ||
+            existingProduct.Shipping_Width,
+          Shipping_Depth:
+            el?.values?.Shipping_Depth?.[0]?.data ||
+            existingProduct.Shipping_Depth,
+          // Freight_Class: el?.values?.Freight_Class?.[0]?.data || "",
           Pricing_Category: el?.values?.Pricing_Category?.[0]?.data
             ? el?.values?.Pricing_Category?.[0]?.data
             : "Default",
-          List_Price: el?.values?.List_Price?.[0]?.data?.[0]?.amount || "",
-          Net_Cost: el?.values?.Net_Cost?.[0]?.data?.[0]?.amount || "",
-          Dealer_NetCost_Discount: "",
-          MAP_Price: el?.values?.MAP_Price?.[0]?.data?.[0]?.amount || "",
-          MAP_Policy: el?.values?.MAP_Policy?.[0]?.data || "",
+          List_Price:
+            el?.values?.List_Price?.[0]?.data?.[0]?.amount ||
+            existingProduct.List_Price,
+          Net_Cost:
+            el?.values?.Net_Cost?.[0]?.data?.[0]?.amount ||
+            existingProduct.Net_Cost,
+          // Dealer_NetCost_Discount: "",
+          MAP_Price:
+            el?.values?.MAP_Price?.[0]?.data?.[0]?.amount ||
+            existingProduct.MAP_Price,
+          MAP_Policy:
+            el?.values?.MAP_Policy?.[0]?.data || existingProduct.MAP_Policy,
           Compare_at_price: el?.values?.Compare_at_price?.[0]?.data?.[0].amount,
           Free_Shipping: el?.values.Free_Shipping?.[0]?.data,
         };
-
         productsToInsert.push(updatedProduct);
       }
     }
@@ -276,6 +262,128 @@ const getProduct = catchAsync(async (request, response) => {
           },
         }))
       );
+
+      const products = await Products.find({
+        minimumMargin: { $nin: ["", undefined, "0", 0] },
+      });
+
+      const finalProductsImport = products.map((existingProduct) => {
+        if (
+          existingProduct.minimumMargin !== "" &&
+          existingProduct.minimumMargin !== undefined &&
+          existingProduct.minimumMargin !== "0" &&
+          existingProduct.minimumMargin !== 0
+        ) {
+          let {
+            isAkeneo_NetCost_Discount,
+            TotalAdditionalFeePercentage,
+            TotalAdditionalFeePrice,
+            vendorRulePrice,
+            vendorRulePrice_Percentage,
+            isVendorRules,
+            minimumMargin,
+            AdditionalFee,
+            Shipping_Method,
+            Shipping_Weight,
+            isAkeneo_MapDiscount,
+            Dealer_MapPriceCalc,
+            Dealer_NetCost_Discount,
+            List_Price,
+            Net_Cost,
+            MAP_Price,
+            MAP_Policy,
+          } = existingProduct;
+          let dealerDiscount = existingProduct.Net_Cost_percentage;
+          console.log(
+            existingProduct.minimumMargin,
+            "existingProduct----------------"
+          );
+
+          let netPriceResult = calculateNetPrice(
+            dealerDiscount,
+            List_Price,
+            isAkeneo_NetCost_Discount,
+            Net_Cost,
+            TotalAdditionalFeePercentage,
+            TotalAdditionalFeePrice,
+            vendorRulePrice,
+            vendorRulePrice_Percentage,
+            isVendorRules,
+            minimumMargin,
+            AdditionalFee,
+            Shipping_Method,
+            Shipping_Weight,
+            shippingRules
+          );
+
+          let mapPrice = isAkeneo_MapDiscount === "true" ? MAP_Price : "";
+
+          // ////////------------------------------ Map Price Based Calculations END--------------------------------///////
+
+          const numericTotalCost = parseFloat(netPriceResult.totalCost);
+          if (MAP_Policy === "true") {
+            if (mapPrice) {
+              const numericMapPrice = parseFloat(mapPrice);
+
+              const mapMargin =
+                ((numericMapPrice - numericTotalCost) / numericMapPrice) * 100;
+
+              if (mapMargin >= 0 && mapMargin < minimumMargin) {
+                netPriceResult.sellingPrice =
+                  numericTotalCost / (1 - minimumMargin / 100);
+              } else {
+                netPriceResult.sellingPrice = numericMapPrice;
+                netPriceResult.marginProfit = Math.max(
+                  mapMargin,
+                  minimumMargin
+                );
+              }
+
+              if (
+                (MAP_Price === "" && Dealer_MapPriceCalc === "") ||
+                MAP_Price === 0 ||
+                MAP_Price === undefined
+              ) {
+                netPriceResult.marginProfit = 0;
+                netPriceResult.sellingPrice = 0;
+              }
+            }
+          } else {
+            netPriceResult.sellingPrice =
+              numericTotalCost / (1 - minimumMargin / 100);
+            netPriceResult.marginProfit = minimumMargin;
+          }
+
+          if (
+            (Net_Cost === "" && Dealer_NetCost_Discount === "") ||
+            List_Price === "" ||
+            (Number(Net_Cost) === 0 && Dealer_NetCost_Discount === 0) ||
+            Number(List_Price) === 0 ||
+            (Net_Cost === undefined && Dealer_NetCost_Discount === undefined) ||
+            List_Price === undefined ||
+            netPriceResult.totalShiping === 0 ||
+            netPriceResult.totalShiping === "" ||
+            netPriceResult.totalShiping === undefined
+          ) {
+            netPriceResult.marginProfit = 0;
+            netPriceResult.sellingPrice = 0;
+          }
+          return {
+            updateOne: {
+              filter: { _id: existingProduct._id },
+              update: {
+                $set: {
+                  Price: netPriceResult.sellingPrice,
+                },
+              },
+              upsert: false,
+            },
+          };
+        }
+      });
+
+      await Products.bulkWrite(finalProductsImport);
+
       const message = `products imported sucessfully`;
 
       response.status(200).json({ message });
