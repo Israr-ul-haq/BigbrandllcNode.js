@@ -8,33 +8,48 @@ const { resolve } = require("path");
 const { page } = require("../utils/customLabels");
 const { response } = require("express");
 const { request } = require("http");
-const { Products, ShippingRules } = require("../models");
+const { Products, ShippingRules, CompetitonProducts } = require("../models");
 const { calculateNetPrice } = require("../services/Calculations/NetCostCal");
 
 const domain = "akeneo.bigbrandsllc.co";
-const data = JSON.stringify({
-  grant_type: "password",
-  client_id: "3_6dmd2zantk00cw8o0owcckc8gcgkgc048wg44gkg0ggwsgokow",
-  client_secret: "1uwlu3bo4xwks4084wc4wwo0cc80g4wcok88g8o4gs8cwgggw4",
-  username: "exporttoreactapp_7194",
-  password: "2d0df5643",
-});
-const options = {
-  hostname: domain,
-  path: "/api/oauth/v1/token",
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "Content-Length": data.length,
-  },
-};
+// const data = JSON.stringify({
+//   grant_type: "password",
+//   client_id: "3_6dmd2zantk00cw8o0owcckc8gcgkgc048wg44gkg0ggwsgokow",
+//   client_secret: "1uwlu3bo4xwks4084wc4wwo0cc80g4wcok88g8o4gs8cwgggw4",
+//   username: "exporttoreactapp_7194",
+//   password: "2d0df5643",
+// });
+// const options = {
+//   hostname: domain,
+//   path: "/api/oauth/v1/token",
+//   method: "POST",
+//   headers: {
+//     "Content-Type": "application/json",
+//     "Content-Length": data.length,
+//   },
+// };
 let token = null,
   token_time = null;
 const generateToken = async (request, response, next) => {
-  if (
-    token == null ||
-    (token != null && Date.now() - token_time > 3600 * 1000)
-  ) {
+  const data = request.params.data;
+
+  if (data?.length !== undefined) {
+    const Datadomain = JSON.parse(data);
+
+    const options = {
+      hostname: Datadomain.domain,
+      path: "/api/oauth/v1/token",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": data.length,
+      },
+    };
+
+    // if (
+    //   token == null ||
+    //   (token != null && Date.now() - token_time > 3600 * 1000)
+    // ) {
     const req = https.request(options, (res) => {
       let response_data = "";
       res.on("data", (chunk) => {
@@ -46,13 +61,15 @@ const generateToken = async (request, response, next) => {
         next();
       });
     });
+
     req.on("error", (error) => {
       response.status(httpStatus.NOT_FOUND).send("server error");
     });
     req.write(data);
     req.end();
-  } else {
-    next();
+    // } else {
+    //   next();
+    // }
   }
 };
 const getToken = catchAsync(async (request, response) => {
@@ -88,8 +105,22 @@ const downloadImage = (url, dst) => {
 };
 
 const getProduct = catchAsync(async (request, response) => {
-  async function getAllProducts(search, enabled, token, limit = 100) {
-    const domain = "akeneo.bigbrandsllc.co";
+  const requestData = JSON.parse(request.params.data);
+
+  const Datadomain = requestData.domain;
+
+  const sourceId = requestData.client_secret;
+
+  console.log(sourceId);
+  async function getAllProducts(
+    search,
+    enabled,
+    token,
+    sourceId,
+    Datadomain,
+    limit = 100
+  ) {
+    const domain = Datadomain;
     let page = 1;
     let totalCount = 0;
     let items = [];
@@ -150,7 +181,7 @@ const getProduct = catchAsync(async (request, response) => {
       }
     };
 
-    const existingProducts = await Products.find();
+    const existingProducts = await Products.find({ sourceId });
     const shippingRules = await ShippingRules.find();
 
     const productsToInsert = [];
@@ -186,6 +217,7 @@ const getProduct = catchAsync(async (request, response) => {
           MAP_Policy: el?.values?.MAP_Policy?.[0]?.data || "",
           Compare_at_price: el?.values?.Compare_at_price?.[0]?.data?.[0].amount,
           Free_Shipping: el?.values.Free_Shipping?.[0]?.data,
+          Shipping_Height: el?.values?.Shipping_Height?.[0]?.data || "",
           Shipping_Cost: "",
           Dealer_MapPrice: "",
           isAkeneo_NetCost_Discount: "true",
@@ -205,6 +237,8 @@ const getProduct = catchAsync(async (request, response) => {
           vendorRulePrice_Percentage: "",
           TotalAdditionalFee: "",
           minimumMargin: "",
+          sourceId: sourceId || "",
+          maxMargin: false,
         });
       } else {
         const updatedProduct = {
@@ -219,6 +253,9 @@ const getProduct = catchAsync(async (request, response) => {
           Shipping_Method:
             el?.values?.Shipping_Method?.[0]?.data ||
             existingProduct.Shipping_Method,
+          Shipping_Height:
+            el?.values?.Shipping_Height?.[0]?.data ||
+            existingProduct.Shipping_Height,
           Shipping_Weight:
             el?.values?.Shipping_Weight?.[0]?.data ||
             existingProduct.Shipping_Weight,
@@ -246,6 +283,7 @@ const getProduct = catchAsync(async (request, response) => {
             el?.values?.MAP_Policy?.[0]?.data || existingProduct.MAP_Policy,
           Compare_at_price: el?.values?.Compare_at_price?.[0]?.data?.[0].amount,
           Free_Shipping: el?.values.Free_Shipping?.[0]?.data,
+          sourceId: sourceId || "",
         };
         productsToInsert.push(updatedProduct);
       }
@@ -266,6 +304,8 @@ const getProduct = catchAsync(async (request, response) => {
       const products = await Products.find({
         minimumMargin: { $nin: ["", undefined, "0", 0] },
       });
+
+      const competitionProducts = await CompetitonProducts.find();
 
       const finalProductsImport = products.map((existingProduct) => {
         if (
@@ -292,12 +332,37 @@ const getProduct = catchAsync(async (request, response) => {
             Net_Cost,
             MAP_Price,
             MAP_Policy,
+            isShipping_Cost,
+            maxMargin,
           } = existingProduct;
           let dealerDiscount = existingProduct.Net_Cost_percentage;
-          console.log(
-            existingProduct.minimumMargin,
-            "existingProduct----------------"
+
+          const filteredCompetitionsData = competitionProducts.filter(
+            (i) =>
+              i.productId === existingProduct.SKU &&
+              i.compete_RoundedPrice !== "0" &&
+              i.compete_lowest_price !== "0"
           );
+
+          let isAllProductsAvailable = true;
+
+          for (let i = 0; i < filteredCompetitionsData.length; i++) {
+            if (!filteredCompetitionsData[i].isProductAvailible) {
+              isAllProductsAvailable = false;
+              break;
+            }
+          }
+
+          let margin = 0;
+
+          if (
+            isAllProductsAvailable &&
+            maxMargin !== "" &&
+            maxMargin !== undefined &&
+            maxMargin !== "0"
+          ) {
+            margin = maxMargin;
+          }
 
           let netPriceResult = calculateNetPrice(
             dealerDiscount,
@@ -313,7 +378,8 @@ const getProduct = catchAsync(async (request, response) => {
             AdditionalFee,
             Shipping_Method,
             Shipping_Weight,
-            shippingRules
+            shippingRules,
+            isShipping_Cost
           );
 
           let mapPrice = isAkeneo_MapDiscount === "true" ? MAP_Price : "";
@@ -321,38 +387,38 @@ const getProduct = catchAsync(async (request, response) => {
           // ////////------------------------------ Map Price Based Calculations END--------------------------------///////
 
           const numericTotalCost = parseFloat(netPriceResult.totalCost);
-          if (MAP_Policy === "true") {
-            if (mapPrice) {
-              const numericMapPrice = parseFloat(mapPrice);
+          // if (MAP_Policy === "true") {
+          //   if (mapPrice) {
+          //     const numericMapPrice = parseFloat(mapPrice);
 
-              const mapMargin =
-                ((numericMapPrice - numericTotalCost) / numericMapPrice) * 100;
+          //     const mapMargin =
+          //       ((numericMapPrice - numericTotalCost) / numericMapPrice) * 100;
 
-              if (mapMargin >= 0 && mapMargin < minimumMargin) {
-                netPriceResult.sellingPrice =
-                  numericTotalCost / (1 - minimumMargin / 100);
-              } else {
-                netPriceResult.sellingPrice = numericMapPrice;
-                netPriceResult.marginProfit = Math.max(
-                  mapMargin,
-                  minimumMargin
-                );
-              }
+          //     if (mapMargin >= 0 && mapMargin < minimumMargin) {
+          //       netPriceResult.sellingPrice =
+          //         numericTotalCost / (1 - minimumMargin / 100);
+          //     } else {
+          //       netPriceResult.sellingPrice = numericMapPrice;
+          //       netPriceResult.marginProfit = Math.max(
+          //         mapMargin,
+          //         minimumMargin
+          //       );
+          //     }
 
-              if (
-                (MAP_Price === "" && Dealer_MapPriceCalc === "") ||
-                MAP_Price === 0 ||
-                MAP_Price === undefined
-              ) {
-                netPriceResult.marginProfit = 0;
-                netPriceResult.sellingPrice = 0;
-              }
-            }
-          } else {
-            netPriceResult.sellingPrice =
-              numericTotalCost / (1 - minimumMargin / 100);
-            netPriceResult.marginProfit = minimumMargin;
-          }
+          //     if (
+          //       (MAP_Price === "" && Dealer_MapPriceCalc === "") ||
+          //       MAP_Price === 0 ||
+          //       MAP_Price === undefined
+          //     ) {
+          //       netPriceResult.marginProfit = 0;
+          //       netPriceResult.sellingPrice = 0;
+          //     }
+          //   }
+          // } else {
+          //   netPriceResult.sellingPrice =
+          //     numericTotalCost / (1 - minimumMargin / 100);
+          //   netPriceResult.marginProfit = minimumMargin;
+          // }
 
           if (
             (Net_Cost === "" && Dealer_NetCost_Discount === "") ||
@@ -361,13 +427,48 @@ const getProduct = catchAsync(async (request, response) => {
             Number(List_Price) === 0 ||
             (Net_Cost === undefined && Dealer_NetCost_Discount === undefined) ||
             List_Price === undefined ||
-            netPriceResult.totalShiping === 0 ||
-            netPriceResult.totalShiping === "" ||
-            netPriceResult.totalShiping === undefined
+            (netPriceResult.totalShiping === 0 && isShipping_Cost === "true") ||
+            (netPriceResult.totalShiping === "" &&
+              isShipping_Cost === "true") ||
+            (netPriceResult.totalShiping === undefined &&
+              isShipping_Cost === "true")
           ) {
             netPriceResult.marginProfit = 0;
             netPriceResult.sellingPrice = 0;
           }
+
+          const filteredCompetitions = competitionProducts.filter(
+            (i) =>
+              i.productId === existingProduct.SKU &&
+              i.compete_RoundedPrice !== "0" &&
+              i.compete_lowest_price !== "0"
+          );
+
+          if (filteredCompetitions.length > 0) {
+            const firstCompetition = filteredCompetitions[0];
+
+            if (existingProduct.isRoundDown) {
+              if (
+                parseFloat(firstCompetition.compete_RoundedPrice) >
+                parseFloat(netPriceResult.sellingPrice)
+              ) {
+                netPriceResult.sellingPrice =
+                  firstCompetition.compete_RoundedPrice;
+                console.log(netPriceResult.sellingPrice);
+              }
+            } else {
+              if (
+                parseFloat(firstCompetition.compete_lowest_price) >
+                parseFloat(netPriceResult.sellingPrice)
+              ) {
+                netPriceResult.sellingPrice =
+                  firstCompetition.compete_lowest_price;
+
+                console.log(netPriceResult.sellingPrice);
+              }
+            }
+          }
+
           return {
             updateOne: {
               filter: { _id: existingProduct._id },
@@ -392,7 +493,7 @@ const getProduct = catchAsync(async (request, response) => {
       response.status(200).json({ message });
     }
   }
-  getAllProducts("", false, token);
+  getAllProducts("", false, token, sourceId, Datadomain);
 });
 
 const addProduct = catchAsync(async (request, response) => {
@@ -428,6 +529,8 @@ const addProduct = catchAsync(async (request, response) => {
 
 const updateProduct = catchAsync(async (request, response) => {
   const { products } = request.body;
+  const data = request.params.data;
+  const Datadomain = JSON.parse(data);
 
   const updateMultipleProducts = async (products) => {
     const promises = products.map((product) => {
@@ -469,7 +572,7 @@ const updateProduct = catchAsync(async (request, response) => {
       };
 
       const option = {
-        hostname: domain,
+        hostname: Datadomain.domain,
         path: `/api/rest/v1/products/${encodeURIComponent(identifier)}`,
         method: "PATCH",
         headers: {
@@ -528,6 +631,8 @@ const updateTableColumns = catchAsync(async (request, response) => {
   response.status(httpStatus.OK).send({ success: true, data: tablecolums });
 });
 const getBrand = catchAsync(async (request, response) => {
+  console.log(token);
+
   const option = {
     hostname: domain,
     path: `/api/rest/v1/attributes/Brand/options`,
@@ -647,8 +752,12 @@ const addVendor = catchAsync(async (request, response) => {
 });
 
 const getAkneoBrands = catchAsync(async (request, response) => {
+  console.log(token);
+  const data = request.params.data;
+  const Datadomain = JSON.parse(data);
+
   const option = {
-    hostname: domain,
+    hostname: Datadomain.domain,
     path: "/api/rest/v1/attributes/brand/options?limit=100",
     method: "GET",
     headers: {

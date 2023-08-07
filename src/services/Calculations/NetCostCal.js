@@ -12,7 +12,8 @@ export const calculateNetPrice = (
   AdditionalFee,
   Shipping_Method,
   Shipping_Weight,
-  shippingRules
+  shippingRules, 
+  isShipping_Cost
 ) => {
   const calculatePrice = (value, price) => {
     // Calculate the price with discount
@@ -78,7 +79,7 @@ export const calculateNetPrice = (
       }
     });
 
-    if (totalShippingPrice) {
+    if (totalShippingPrice && isShipping_Cost === "true") {
       totalShiping = totalShippingPrice;
     } else {
       totalShiping = 0;

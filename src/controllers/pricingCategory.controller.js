@@ -4,8 +4,11 @@ const ApiError = require("@utils/ApiError");
 const { pricingService } = require("@services");
 
 const getPricings = catchAsync(async (req, res) => {
-  const { brandId } = req.params;
-  const pricingCategory = await pricingService.getPricingCategory(brandId);
+  const { brandId, client_secret } = req.params;
+  const pricingCategory = await pricingService.getPricingCategory(
+    brandId,
+    client_secret
+  );
   res.status(httpStatus.OK).send(pricingCategory);
 });
 const updatePricings = catchAsync(async (req, res) => {

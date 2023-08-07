@@ -36,8 +36,12 @@ const setAkeneoStatusFalse = catchAsync(async (req, res) => {
   res.status(httpStatus.OK).send(productsByStatus);
 });
 const updateProductWebsiteId = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const products = await productsService.updateProductsWebsiteId(id, req.body);
+  const { id, sourceId } = req.params;
+  const products = await productsService.updateProductsWebsiteId(
+    id,
+    sourceId,
+    req.body
+  );
   res.status(httpStatus.OK).send(products);
 });
 

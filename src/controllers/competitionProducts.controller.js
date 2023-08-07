@@ -4,10 +4,12 @@ const ApiError = require("@utils/ApiError");
 const { competitionProductsService } = require("../services");
 
 const createCompetionProducts = catchAsync(async (req, res) => {
-  const { competeData } = req.body;
+  const { competeData, productFields } = req.body;
 
-  const cometeData =
-    await competitionProductsService.createCompetitionProducts(competeData);
+  const cometeData = await competitionProductsService.createCompetitionProducts(
+    competeData,
+    productFields
+  );
   res.status(httpStatus.OK).send(cometeData);
 });
 const getCompetitionProductsData = catchAsync(async (req, res) => {

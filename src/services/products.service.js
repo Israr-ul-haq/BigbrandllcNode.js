@@ -31,6 +31,7 @@ const getAllProducts = async (query) => {
     pricing_category = "",
     includeZeroPrice = false,
     hasPrice = false,
+    sourceId = "",
   } = query;
   const regex = new RegExp(search, "i");
 
@@ -43,6 +44,10 @@ const getAllProducts = async (query) => {
       { Pricing_Category: regex },
     ],
   };
+
+  if (sourceId) {
+    searchQuery.sourceId = sourceId; // Include sourceId in the search query if it exists
+  }
 
   if (brandId !== "") {
     searchQuery.Brand = brandId;
@@ -60,7 +65,8 @@ const getAllProducts = async (query) => {
 
   const total = await Products.countDocuments(searchQuery);
   const totalPages = Math.ceil(total / limit);
-  const adjustedPage = Math.min(page, totalPages); // Adjust the page number if it exceeds the total pages
+  let adjustedPage = Math.min(page, totalPages); // Adjust the page number if it exceeds the total pages
+  adjustedPage = Math.max(adjustedPage, 1); // Ensure that adjustedPage is never less than 1
 
   const startIndex = (adjustedPage - 1) * limit;
   const endIndex = Math.min(startIndex + limit, total);
@@ -70,16 +76,19 @@ const getAllProducts = async (query) => {
     .skip(startIndex)
     .limit(limit);
 
+  if (!products || products.length === 0) {
+    return {
+      error: true,
+      message: "No products found.",
+    };
+  }
+
   const results = {
     currentPage: adjustedPage,
     totalPages: totalPages,
     totalResults: total,
     results: products,
   };
-
-  if (products.length === 0) {
-    results.message = "No products found.";
-  }
 
   return results;
 };
@@ -186,10 +195,14 @@ const setAllAkeneoStatusToFalse = async () => {
     throw error;
   }
 };
-const updateProductsWebsiteId = async (brandId, { competitionData }) => {
+const updateProductsWebsiteId = async (
+  brandId,
+  sourceId,
+  { competitionData }
+) => {
   try {
     const updatedProducts = await Products.updateMany(
-      { Brand: brandId },
+      { Brand: brandId, sourceId: sourceId },
       { $set: { competitionData: competitionData } }
     );
 

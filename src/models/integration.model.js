@@ -8,6 +8,8 @@ module.exports = ({ Schema, Types, model }, mongoosePaginate) => {
       password: { type: String },
       secret: { type: String },
       clientId: { type: String },
+      domain: { type: String },
+      status: { type: Boolean },
     },
     {
       timestamps: true,

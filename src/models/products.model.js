@@ -16,6 +16,7 @@ module.exports = ({ Schema, Types, model }, mongoosePaginate) => {
       Shipping_Width: { type: String },
       Shipping_Depth: { type: String },
       Shipping_Cost: { type: String },
+      Shipping_Height: { type: String },
       Freight_Class: { type: String },
       Pricing_Category: { type: String },
       Price: { type: String },
@@ -49,6 +50,9 @@ module.exports = ({ Schema, Types, model }, mongoosePaginate) => {
       ProfitMargin: { type: String },
       competitionData: { type: Array },
       akeneoStatus: { type: Boolean },
+      isRoundDown: { type: Boolean },
+      maxMargin: { type: String },
+      sourceId: { type: String },
     },
     {
       timestamps: true,

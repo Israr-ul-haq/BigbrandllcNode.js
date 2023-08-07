@@ -18,16 +18,16 @@ const {
   updateProductData,
 } = require("../controllers/akeneoController");
 router.post("/token", getToken);
-router.get("/products", generateToken, getProduct);
+router.get("/products/:data", generateToken, getProduct);
 router.post("/products", generateToken, addProduct);
-router.put("/products", generateToken, updateProduct);
+router.put("/products/:data", generateToken, updateProduct);
 router.get("/tables", getTableColumns);
 router.post("/tables", updateTableColumns);
 router.get("/brand", generateToken, getBrand);
 router.post("/brand", generateToken, addBrand);
 router.get("/product-category", generateToken, getVendor);
 router.post("/product-category", generateToken, addVendor);
-router.get("/AkeneoBrands", generateToken, getAkneoBrands);
+router.get("/AkeneoBrands/:data", generateToken, getAkneoBrands);
 router.get("/product_categories", generateToken, getProductCategories);
 router.get(
   "/pricingCategories/:brandId",

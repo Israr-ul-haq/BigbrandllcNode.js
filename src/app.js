@@ -50,7 +50,7 @@ app.use(compression());
 app.options("*", cors());
 app.use(
   cors({
-    origin: "https://akeneo.bigbrandsllc.co",
+    origin: ["https://akeneo.bigbrandsllc.co", "http://localhost:3000"],
     methods: "GET",
     optionsSuccessStatus: 200,
   })
@@ -65,27 +65,6 @@ const routes = require("./routes");
 app.use("/api/v1", routes);
 
 app.use(express.static(path.join(__dirname, "public")));
-// const swaggerDocument = require("./config/swagger.json");
-// const options = {
-//   swaggerOptions: {
-//     validatorUrl: null,
-//   },
-// };
-//
-// app.use(
-//   "/api-docs",
-//   swaggerUi.serve,
-//   swaggerUi.setup(swaggerDocument, options)
-// );
-
-// app.use((req, res, next) => {
-//   next(new ApiError(httpStatus.NOT_FOUND, "Not found"));
-// });
-
-// app.use(errorConverter);
-
-// app.use(errorHandler);
-// expressOasGenerator.handleRequests();
 
 module.exports = {
   app,

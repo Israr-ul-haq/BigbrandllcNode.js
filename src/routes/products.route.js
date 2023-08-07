@@ -22,7 +22,7 @@ router.put("/updateProduct/:id", productsController.updateProducts);
 router.put("/updateProductStatus", productsController.updateProductsStatus);
 router.put("/setAkeneoStatusFalse", productsController.setAkeneoStatusFalse);
 router.put(
-  "/update_the_products_websiteId/:id",
+  "/update_the_products_websiteId/:id/:sourceId",
   productsController.updateProductWebsiteId
 );
 router.put(

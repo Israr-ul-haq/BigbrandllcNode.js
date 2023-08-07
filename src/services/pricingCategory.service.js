@@ -1,9 +1,15 @@
 const httpStatus = require("http-status"),
-  { Pricing_Category, Products, ShippingRules } = require("@models"),
+  {
+    Pricing_Category,
+    Products,
+    ShippingRules,
+    CompetitonProducts,
+  } = require("@models"),
   ApiError = require("@utils/ApiError"),
   customLabels = require("@utils/customLabels"),
   defaultSort = require("@utils/defaultSort");
 const { calculateNetPrice } = require("./Calculations/NetCostCal");
+const { competitionCalc } = require("./Calculations/competionCal");
 
 /**
  * Get Pricing_Category
@@ -11,9 +17,10 @@ const { calculateNetPrice } = require("./Calculations/NetCostCal");
  * @returns {Promise<Pricing_Category[]>}
  * @throws {ApiError}
  */
-const getPricingCategory = async (brandId) => {
+const getPricingCategory = async (brandId, client_secret) => {
   const products = await Products.find({
     Brand: brandId,
+    sourceId: client_secret,
   });
 
   const categoryCounts = {};
@@ -44,6 +51,8 @@ const getPricingCategory = async (brandId) => {
       TotalAdditionalFeePercentage,
       TotalAdditionalFeePrice,
       competitionData,
+      maxMargin,
+      isRoundDown,
     } = product;
     if (categoryCounts[Pricing_Category]) {
       categoryCounts[Pricing_Category].count++;
@@ -72,6 +81,8 @@ const getPricingCategory = async (brandId) => {
         TotalAdditionalFeePercentage,
         TotalAdditionalFeePrice,
         competitionData,
+        maxMargin,
+        isRoundDown,
       };
     }
   });
@@ -104,6 +115,8 @@ const getPricingCategory = async (brandId) => {
         TotalAdditionalFeePercentage,
         TotalAdditionalFeePrice,
         competitionData,
+        maxMargin,
+        isRoundDown,
       },
     ]) => ({
       category,
@@ -130,6 +143,8 @@ const getPricingCategory = async (brandId) => {
       TotalAdditionalFeePercentage,
       TotalAdditionalFeePrice,
       competitionData,
+      maxMargin,
+      isRoundDown,
     })
   );
 
@@ -164,10 +179,14 @@ const updatePricingCategory = async ({
   minimumMargin,
   TotalAdditionalFeePercentage,
   TotalAdditionalFeePrice,
+  isRoundDown,
+  maxMargin,
+  sourceId,
 }) => {
   ////GETTING THE PRODUCTS BY BRAND AND CATEGORY
   const products = await Products.find({
     Brand: brandId,
+    sourceId: sourceId,
     Pricing_Category: { $ne: "", $eq: pricing_category },
   });
 
@@ -211,12 +230,43 @@ const updatePricingCategory = async ({
     minimumMargin,
     TotalAdditionalFeePercentage,
     TotalAdditionalFeePrice,
+    isRoundDown,
+    maxMargin,
   };
 
   const shippingRules = await ShippingRules.find();
 
+  const competitionProducts = await CompetitonProducts.find();
+
   const bulkOperations = products.map((product) => {
     /// the rebate is depend on the NetCost or akenoe
+
+    const filteredCompetitions = competitionProducts.filter(
+      (i) =>
+        i.productId === product.SKU &&
+        i.compete_RoundedPrice !== "0" &&
+        i.compete_lowest_price !== "0"
+    );
+
+    let isAllProductsAvailable = true;
+
+    for (let i = 0; i < filteredCompetitions.length; i++) {
+      if (!filteredCompetitions[i].isProductAvailible) {
+        isAllProductsAvailable = false;
+        break;
+      }
+    }
+
+    let margin = 0;
+
+    if (
+      isAllProductsAvailable &&
+      maxMargin !== "" &&
+      maxMargin !== undefined &&
+      maxMargin !== "0"
+    ) {
+      margin = maxMargin;
+    }
 
     let List_Price = product.List_Price;
     let Net_Cost = product.Net_Cost;
@@ -244,11 +294,12 @@ const updatePricingCategory = async ({
       vendorRulePrice,
       vendorRulePrice_Percentage,
       isVendorRules,
-      minimumMargin,
+      margin,
       AdditionalFee,
       Shipping_Method,
       Shipping_Weight,
-      shippingRules
+      shippingRules,
+      isShipping_Cost
     );
 
     // ////////------------------Map Price Based Calculations START--------------------------------////
@@ -264,34 +315,58 @@ const updatePricingCategory = async ({
     // ////////------------------------------ Map Price Based Calculations END--------------------------------///////
 
     const numericTotalCost = parseFloat(netPriceResult.totalCost);
-    if (MAP_Policy === "true") {
-      if (mapPrice) {
-        const numericMapPrice = parseFloat(mapPrice);
+    // if (MAP_Policy === "true") {
+    //   if (mapPrice) {
+    //     const numericMapPrice = parseFloat(mapPrice);
 
-        const mapMargin =
-          ((numericMapPrice - numericTotalCost) / numericMapPrice) * 100;
+    //     const mapMargin =
+    //       ((numericMapPrice - numericTotalCost) / numericMapPrice) * 100;
 
-        if (mapMargin >= 0 && mapMargin < minimumMargin) {
-          netPriceResult.sellingPrice =
-            numericTotalCost / (1 - minimumMargin / 100);
-        } else {
-          netPriceResult.sellingPrice = numericMapPrice;
-          netPriceResult.marginProfit = Math.max(mapMargin, minimumMargin);
-        }
+    //     if (mapMargin >= 0 && mapMargin < minimumMargin) {
+    //       netPriceResult.sellingPrice =
+    //         numericTotalCost / (1 - minimumMargin / 100);
+    //     } else {
+    //       netPriceResult.sellingPrice = numericMapPrice;
+    //       netPriceResult.marginProfit = Math.max(mapMargin, minimumMargin);
+    //     }
 
+    //     if (
+    //       (product.MAP_Price === "" && Dealer_MapPriceCalc === "") ||
+    //       product.MAP_Price === 0 ||
+    //       product.MAP_Price === undefined
+    //     ) {
+    //       netPriceResult.marginProfit = 0;
+    //       netPriceResult.sellingPrice = 0;
+    //     }
+    //   }
+    // } else {
+    //   netPriceResult.sellingPrice =
+    //     numericTotalCost / (1 - minimumMargin / 100);
+    //   netPriceResult.marginProfit = minimumMargin;
+    // }
+
+    if (filteredCompetitions.length > 0) {
+      const firstCompetition = filteredCompetitions[0];
+
+      if (isRoundDown) {
         if (
-          (product.MAP_Price === "" && Dealer_MapPriceCalc === "") ||
-          product.MAP_Price === 0 ||
-          product.MAP_Price === undefined
+          parseFloat(firstCompetition.compete_RoundedPrice) >
+          parseFloat(netPriceResult.sellingPrice)
         ) {
-          netPriceResult.marginProfit = 0;
-          netPriceResult.sellingPrice = 0;
+          netPriceResult.sellingPrice = firstCompetition.compete_RoundedPrice;
+          netPriceResult.marginProfit = firstCompetition.lowestMargin;
+        }
+      } else {
+        if (
+          parseFloat(firstCompetition.compete_lowest_price) >
+          parseFloat(netPriceResult.sellingPrice)
+        ) {
+          netPriceResult.sellingPrice = firstCompetition.compete_lowest_price;
+          netPriceResult.marginProfit = firstCompetition.lowestMargin;
+
+          console.log(netPriceResult.sellingPrice);
         }
       }
-    } else {
-      netPriceResult.sellingPrice =
-        numericTotalCost / (1 - minimumMargin / 100);
-      netPriceResult.marginProfit = minimumMargin;
     }
 
     if (
@@ -301,9 +376,9 @@ const updatePricingCategory = async ({
       Number(List_Price) === 0 ||
       (Net_Cost === undefined && Dealer_NetCost_Discount === undefined) ||
       List_Price === undefined ||
-      netPriceResult.totalShiping === 0 ||
-      netPriceResult.totalShiping === "" ||
-      netPriceResult.totalShiping === undefined
+      (netPriceResult.totalShiping === 0 && isShipping_Cost === "true") ||
+      (netPriceResult.totalShiping === "" && isShipping_Cost === "true") ||
+      (netPriceResult.totalShiping === undefined && isShipping_Cost === "true")
     ) {
       netPriceResult.marginProfit = 0;
       netPriceResult.sellingPrice = 0;
@@ -345,15 +420,18 @@ const updatePricingCategory = async ({
             TotalAdditionalFeePercentage: TotalAdditionalFeePercentage,
             TotalAdditionalFeePrice: TotalAdditionalFeePrice,
             FinalTotalAdditionalFeePrice: netPriceResult.result,
-            Price: netPriceResult.sellingPrice,
+            Price: netPriceResult.sellingPrice.toString(),
             ProfitMargin: netPriceResult.marginProfit,
             Freight_Class: netPriceResult.freightClassesString,
+            isRoundDown: isRoundDown,
+            maxMargin: maxMargin,
           },
         },
       },
     };
   });
   await Products.bulkWrite(bulkOperations);
+
   return response;
 };
 

@@ -1,4 +1,4 @@
-const { ShippingRules, Products } = require("../models");
+const { ShippingRules, Products, CompetitonProducts } = require("../models");
 const ApiError = require("../utils/ApiError");
 const { calculateNetPrice } = require("./Calculations/NetCostCal");
 
@@ -27,6 +27,7 @@ const createRule = async ({
   });
 
   const shippingRules = await ShippingRules.find();
+  const competitionProducts = await CompetitonProducts.find();
 
   const bulkWrite = products.map((product) => {
     if (
@@ -48,6 +49,7 @@ const createRule = async ({
         minimumMargin,
         AdditionalFee,
         Dealer_NetCost_Discount,
+        isShipping_Cost,
       } = product;
 
       let dealerDiscount = product.Net_Cost_percentage;
@@ -67,8 +69,10 @@ const createRule = async ({
         AdditionalFee,
         Shipping_Method,
         Shipping_Weight,
-        shippingRules
+        shippingRules,
+        isShipping_Cost
       );
+
       if (
         (Net_Cost === "" && Dealer_NetCost_Discount === "") ||
         List_Price === "" ||
@@ -76,12 +80,43 @@ const createRule = async ({
         Number(List_Price) === 0 ||
         (Net_Cost === undefined && Dealer_NetCost_Discount === undefined) ||
         List_Price === undefined ||
-        netPriceResult.totalShiping === 0 ||
-        netPriceResult.totalShiping === "" ||
-        netPriceResult.totalShiping === undefined
+        (netPriceResult.totalShiping === 0 && isShipping_Cost === "true") ||
+        (netPriceResult.totalShiping === "" && isShipping_Cost === "true") ||
+        (netPriceResult.totalShiping === undefined &&
+          isShipping_Cost === "true")
       ) {
         netPriceResult.marginProfit = 0;
         netPriceResult.sellingPrice = 0;
+      }
+
+      const filteredCompetitions = competitionProducts.filter(
+        (i) =>
+          i.productId === product.SKU &&
+          i.compete_RoundedPrice !== "0" &&
+          i.compete_lowest_price !== "0"
+      );
+
+      if (filteredCompetitions.length > 0) {
+        const firstCompetition = filteredCompetitions[0];
+
+        if (product.isRoundDown) {
+          if (
+            parseFloat(firstCompetition.compete_RoundedPrice) >
+            parseFloat(netPriceResult.sellingPrice)
+          ) {
+            netPriceResult.sellingPrice = firstCompetition.compete_RoundedPrice;
+            console.log(netPriceResult.sellingPrice);
+          }
+        } else {
+          if (
+            parseFloat(firstCompetition.compete_lowest_price) >
+            parseFloat(netPriceResult.sellingPrice)
+          ) {
+            netPriceResult.sellingPrice = firstCompetition.compete_lowest_price;
+
+            console.log(netPriceResult.sellingPrice);
+          }
+        }
       }
 
       return {
@@ -137,7 +172,7 @@ const updateRule = async (ruleId, updatedFields) => {
     });
 
     const shippingRules = await ShippingRules.find();
-
+    const competitionProducts = await CompetitonProducts.find();
     const bulkWrite = products.map((product) => {
       if (
         product.minimumMargin !== "" &&
@@ -158,6 +193,7 @@ const updateRule = async (ruleId, updatedFields) => {
           minimumMargin,
           AdditionalFee,
           Dealer_NetCost_Discount,
+          isShipping_Cost,
         } = product;
 
         let dealerDiscount = product.Net_Cost_percentage;
@@ -177,7 +213,8 @@ const updateRule = async (ruleId, updatedFields) => {
           AdditionalFee,
           Shipping_Method,
           Shipping_Weight,
-          shippingRules
+          shippingRules,
+          isShipping_Cost
         );
         if (
           (Net_Cost === "" && Dealer_NetCost_Discount === "") ||
@@ -186,12 +223,45 @@ const updateRule = async (ruleId, updatedFields) => {
           Number(List_Price) === 0 ||
           (Net_Cost === undefined && Dealer_NetCost_Discount === undefined) ||
           List_Price === undefined ||
-          netPriceResult.totalShiping === 0 ||
-          netPriceResult.totalShiping === "" ||
-          netPriceResult.totalShiping === undefined
+          (netPriceResult.totalShiping === 0 && isShipping_Cost === "true") ||
+          (netPriceResult.totalShiping === "" && isShipping_Cost === "true") ||
+          (netPriceResult.totalShiping === undefined &&
+            isShipping_Cost === "true")
         ) {
           netPriceResult.marginProfit = 0;
           netPriceResult.sellingPrice = 0;
+        }
+
+        const filteredCompetitions = competitionProducts.filter(
+          (i) =>
+            i.productId === product.SKU &&
+            i.compete_RoundedPrice !== "0" &&
+            i.compete_lowest_price !== "0"
+        );
+
+        if (filteredCompetitions.length > 0) {
+          const firstCompetition = filteredCompetitions[0];
+
+          if (product.isRoundDown) {
+            if (
+              parseFloat(firstCompetition.compete_RoundedPrice) >
+              parseFloat(netPriceResult.sellingPrice)
+            ) {
+              netPriceResult.sellingPrice =
+                firstCompetition.compete_RoundedPrice;
+              console.log(netPriceResult.sellingPrice);
+            }
+          } else {
+            if (
+              parseFloat(firstCompetition.compete_lowest_price) >
+              parseFloat(netPriceResult.sellingPrice)
+            ) {
+              netPriceResult.sellingPrice =
+                firstCompetition.compete_lowest_price;
+
+              console.log(netPriceResult.sellingPrice);
+            }
+          }
         }
 
         return {
@@ -243,6 +313,7 @@ const deleteRule = async (ruleId) => {
     });
 
     const shippingRules = await ShippingRules.find();
+    const competitionProducts = await CompetitonProducts.find();
 
     const bulkWrite = products.map((product) => {
       if (
@@ -264,6 +335,7 @@ const deleteRule = async (ruleId) => {
           minimumMargin,
           AdditionalFee,
           Dealer_NetCost_Discount,
+          isShipping_Cost,
         } = product;
 
         let dealerDiscount = product.Net_Cost_percentage;
@@ -283,7 +355,8 @@ const deleteRule = async (ruleId) => {
           AdditionalFee,
           Shipping_Method,
           Shipping_Weight,
-          shippingRules
+          shippingRules,
+          isShipping_Cost
         );
         if (
           (Net_Cost === "" && Dealer_NetCost_Discount === "") ||
@@ -292,12 +365,45 @@ const deleteRule = async (ruleId) => {
           Number(List_Price) === 0 ||
           (Net_Cost === undefined && Dealer_NetCost_Discount === undefined) ||
           List_Price === undefined ||
-          netPriceResult.totalShiping === 0 ||
-          netPriceResult.totalShiping === "" ||
-          netPriceResult.totalShiping === undefined
+          (netPriceResult.totalShiping === 0 && isShipping_Cost === "true") ||
+          (netPriceResult.totalShiping === "" && isShipping_Cost === "true") ||
+          (netPriceResult.totalShiping === undefined &&
+            isShipping_Cost === "true")
         ) {
           netPriceResult.marginProfit = 0;
           netPriceResult.sellingPrice = 0;
+        }
+
+        const filteredCompetitions = competitionProducts.filter(
+          (i) =>
+            i.productId === product.SKU &&
+            i.compete_RoundedPrice !== "0" &&
+            i.compete_lowest_price !== "0"
+        );
+
+        if (filteredCompetitions.length > 0) {
+          const firstCompetition = filteredCompetitions[0];
+
+          if (product.isRoundDown) {
+            if (
+              parseFloat(firstCompetition.compete_RoundedPrice) >
+              parseFloat(netPriceResult.sellingPrice)
+            ) {
+              netPriceResult.sellingPrice =
+                firstCompetition.compete_RoundedPrice;
+              console.log(netPriceResult.sellingPrice);
+            }
+          } else {
+            if (
+              parseFloat(firstCompetition.compete_lowest_price) >
+              parseFloat(netPriceResult.sellingPrice)
+            ) {
+              netPriceResult.sellingPrice =
+                firstCompetition.compete_lowest_price;
+
+              console.log(netPriceResult.sellingPrice);
+            }
+          }
         }
 
         return {
