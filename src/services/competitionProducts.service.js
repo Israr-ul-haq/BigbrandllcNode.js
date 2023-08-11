@@ -107,13 +107,15 @@ const createCompetitionProducts = async (payload, productFields) => {
         maxMargin,
       } = product;
 
+      let margin = minimumMargin;
+
       if (
         isAllProductsAvailable &&
         maxMargin !== "" &&
         maxMargin !== undefined &&
         maxMargin !== "0"
       ) {
-        minimumMargin = maxMargin;
+        margin = maxMargin;
       }
 
       console.log(minimumMargin);
@@ -131,7 +133,7 @@ const createCompetitionProducts = async (payload, productFields) => {
         vendorRulePrice,
         vendorRulePrice_Percentage,
         isVendorRules,
-        minimumMargin,
+        margin,
         AdditionalFee,
         Shipping_Method,
         Shipping_Weight,

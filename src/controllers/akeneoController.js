@@ -10,6 +10,8 @@ const { response } = require("express");
 const { request } = require("http");
 const { Products, ShippingRules, CompetitonProducts } = require("../models");
 const { calculateNetPrice } = require("../services/Calculations/NetCostCal");
+const { competitionCalc } = require("../services/Calculations/competionCal");
+const { totalAdd } = require("../services/Calculations/TotalAdditional");
 
 const domain = "akeneo.bigbrandsllc.co";
 // const data = JSON.stringify({
@@ -110,8 +112,6 @@ const getProduct = catchAsync(async (request, response) => {
   const Datadomain = requestData.domain;
 
   const sourceId = requestData.client_secret;
-
-  console.log(sourceId);
   async function getAllProducts(
     search,
     enabled,
@@ -334,6 +334,7 @@ const getProduct = catchAsync(async (request, response) => {
             MAP_Policy,
             isShipping_Cost,
             maxMargin,
+            isRoundDown,
           } = existingProduct;
           let dealerDiscount = existingProduct.Net_Cost_percentage;
 
@@ -374,51 +375,75 @@ const getProduct = catchAsync(async (request, response) => {
             vendorRulePrice,
             vendorRulePrice_Percentage,
             isVendorRules,
-            minimumMargin,
+            margin,
             AdditionalFee,
             Shipping_Method,
             Shipping_Weight,
             shippingRules,
             isShipping_Cost
           );
+          ///   competition calculation
+          let payload = competitionProducts.filter(
+            (data) => data.productId === existingProduct.SKU
+          );
+
+          let total = totalAdd(existingProduct);
+
+          const updatedData = competitionCalc(
+            Net_Cost,
+            netPriceResult.totalShiping,
+            total,
+            minimumMargin,
+            payload,
+            isRoundDown,
+            isShipping_Cost,
+            Dealer_NetCost_Discount
+          );
+
+          let finalPrice = isRoundDown
+            ? updatedData.calculatedRoundedPrice
+            : updatedData.calculatedPrice;
 
           let mapPrice = isAkeneo_MapDiscount === "true" ? MAP_Price : "";
 
+          if (finalPrice > 0 && !isAllProductsAvailable) {
+            netPriceResult.sellingPrice = finalPrice;
+            netPriceResult.marginProfit = updatedData.calculatedMargin;
+          } else {
+            const numericTotalCost = parseFloat(netPriceResult.totalCost);
+            if (MAP_Policy === "true") {
+              if (mapPrice) {
+                const numericMapPrice = parseFloat(mapPrice);
+
+                const mapMargin =
+                  ((numericMapPrice - numericTotalCost) / numericMapPrice) *
+                  100;
+
+                if (mapMargin >= 0 && mapMargin < margin) {
+                  netPriceResult.sellingPrice =
+                    numericTotalCost / (1 - margin / 100);
+                } else {
+                  netPriceResult.sellingPrice = numericMapPrice;
+                  netPriceResult.marginProfit = Math.max(mapMargin, margin);
+                }
+
+                if (
+                  (MAP_Price === "" && Dealer_MapPriceCalc === "") ||
+                  MAP_Price === 0 ||
+                  MAP_Price === undefined
+                ) {
+                  netPriceResult.marginProfit = 0;
+                  netPriceResult.sellingPrice = 0;
+                }
+              }
+            } else {
+              netPriceResult.sellingPrice =
+                numericTotalCost / (1 - margin / 100);
+              netPriceResult.marginProfit = margin;
+            }
+          }
+
           // ////////------------------------------ Map Price Based Calculations END--------------------------------///////
-
-          const numericTotalCost = parseFloat(netPriceResult.totalCost);
-          // if (MAP_Policy === "true") {
-          //   if (mapPrice) {
-          //     const numericMapPrice = parseFloat(mapPrice);
-
-          //     const mapMargin =
-          //       ((numericMapPrice - numericTotalCost) / numericMapPrice) * 100;
-
-          //     if (mapMargin >= 0 && mapMargin < minimumMargin) {
-          //       netPriceResult.sellingPrice =
-          //         numericTotalCost / (1 - minimumMargin / 100);
-          //     } else {
-          //       netPriceResult.sellingPrice = numericMapPrice;
-          //       netPriceResult.marginProfit = Math.max(
-          //         mapMargin,
-          //         minimumMargin
-          //       );
-          //     }
-
-          //     if (
-          //       (MAP_Price === "" && Dealer_MapPriceCalc === "") ||
-          //       MAP_Price === 0 ||
-          //       MAP_Price === undefined
-          //     ) {
-          //       netPriceResult.marginProfit = 0;
-          //       netPriceResult.sellingPrice = 0;
-          //     }
-          //   }
-          // } else {
-          //   netPriceResult.sellingPrice =
-          //     numericTotalCost / (1 - minimumMargin / 100);
-          //   netPriceResult.marginProfit = minimumMargin;
-          // }
 
           if (
             (Net_Cost === "" && Dealer_NetCost_Discount === "") ||
@@ -437,37 +462,37 @@ const getProduct = catchAsync(async (request, response) => {
             netPriceResult.sellingPrice = 0;
           }
 
-          const filteredCompetitions = competitionProducts.filter(
-            (i) =>
-              i.productId === existingProduct.SKU &&
-              i.compete_RoundedPrice !== "0" &&
-              i.compete_lowest_price !== "0"
-          );
+          // const filteredCompetitions = competitionProducts.filter(
+          //   (i) =>
+          //     i.productId === existingProduct.SKU &&
+          //     i.compete_RoundedPrice !== "0" &&
+          //     i.compete_lowest_price !== "0"
+          // );
 
-          if (filteredCompetitions.length > 0) {
-            const firstCompetition = filteredCompetitions[0];
+          // if (filteredCompetitions.length > 0) {
+          //   const firstCompetition = filteredCompetitions[0];
 
-            if (existingProduct.isRoundDown) {
-              if (
-                parseFloat(firstCompetition.compete_RoundedPrice) >
-                parseFloat(netPriceResult.sellingPrice)
-              ) {
-                netPriceResult.sellingPrice =
-                  firstCompetition.compete_RoundedPrice;
-                console.log(netPriceResult.sellingPrice);
-              }
-            } else {
-              if (
-                parseFloat(firstCompetition.compete_lowest_price) >
-                parseFloat(netPriceResult.sellingPrice)
-              ) {
-                netPriceResult.sellingPrice =
-                  firstCompetition.compete_lowest_price;
+          //   if (existingProduct.isRoundDown) {
+          //     if (
+          //       parseFloat(firstCompetition.compete_RoundedPrice) >
+          //       parseFloat(netPriceResult.sellingPrice)
+          //     ) {
+          //       netPriceResult.sellingPrice =
+          //         firstCompetition.compete_RoundedPrice;
+          //       console.log(netPriceResult.sellingPrice);
+          //     }
+          //   } else {
+          //     if (
+          //       parseFloat(firstCompetition.compete_lowest_price) >
+          //       parseFloat(netPriceResult.sellingPrice)
+          //     ) {
+          //       netPriceResult.sellingPrice =
+          //         firstCompetition.compete_lowest_price;
 
-                console.log(netPriceResult.sellingPrice);
-              }
-            }
-          }
+          //       console.log(netPriceResult.sellingPrice);
+          //     }
+          //   }
+          // }
 
           return {
             updateOne: {
@@ -475,6 +500,7 @@ const getProduct = catchAsync(async (request, response) => {
               update: {
                 $set: {
                   Price: netPriceResult.sellingPrice,
+                  ProfitMargin: netPriceResult.marginProfit,
                 },
               },
               upsert: false,

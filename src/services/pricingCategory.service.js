@@ -10,6 +10,7 @@ const httpStatus = require("http-status"),
   defaultSort = require("@utils/defaultSort");
 const { calculateNetPrice } = require("./Calculations/NetCostCal");
 const { competitionCalc } = require("./Calculations/competionCal");
+const { totalAdd } = require("./Calculations/TotalAdditional");
 
 /**
  * Get Pricing_Category
@@ -238,9 +239,10 @@ const updatePricingCategory = async ({
 
   const competitionProducts = await CompetitonProducts.find();
 
-  const bulkOperations = products.map((product) => {
-    /// the rebate is depend on the NetCost or akenoe
 
+  const bulkOperations = products.map((product) => {
+    ////If the competition product all fields are disabled then there will be max margin
+    ////--------start-----/////
     const filteredCompetitions = competitionProducts.filter(
       (i) =>
         i.productId === product.SKU &&
@@ -257,7 +259,7 @@ const updatePricingCategory = async ({
       }
     }
 
-    let margin = 0;
+    let margin = minimumMargin;
 
     if (
       isAllProductsAvailable &&
@@ -267,6 +269,7 @@ const updatePricingCategory = async ({
     ) {
       margin = maxMargin;
     }
+    /////------end------/////
 
     let List_Price = product.List_Price;
     let Net_Cost = product.Net_Cost;
@@ -278,6 +281,8 @@ const updatePricingCategory = async ({
       dealerDiscount,
       product.List_Price
     );
+
+    /////-----------min margin calculations ---start -----------------/////
 
     let Dealer_MapPriceCalc = calculatePrice(
       Dealer_MapPrice,
@@ -302,72 +307,104 @@ const updatePricingCategory = async ({
       isShipping_Cost
     );
 
-    // ////////------------------Map Price Based Calculations START--------------------------------////
-
-    const map_price__discount = calculatePrice(
-      Dealer_MapPrice,
-      product.List_Price
+    ///   competition calculation
+    let payload = competitionProducts.filter(
+      (data) => data.productId === product.SKU
     );
 
-    let mapPrice =
-      isAkeneo_MapDiscount === "true" ? product.MAP_Price : map_price__discount;
+    let total = totalAdd(product);
 
-    // ////////------------------------------ Map Price Based Calculations END--------------------------------///////
+    const updatedData = competitionCalc(
+      product.Net_Cost,
+      netPriceResult.totalShiping,
+      total,
+      minimumMargin,
+      payload,
+      product.isRoundDown,
+      isShipping_Cost,
+      Dealer_NetCost_Discount
+    );
 
-    const numericTotalCost = parseFloat(netPriceResult.totalCost);
-    // if (MAP_Policy === "true") {
-    //   if (mapPrice) {
-    //     const numericMapPrice = parseFloat(mapPrice);
+    let finalPrice = product.isRoundDown
+      ? updatedData.calculatedRoundedPrice
+      : updatedData.calculatedPrice;
 
-    //     const mapMargin =
-    //       ((numericMapPrice - numericTotalCost) / numericMapPrice) * 100;
+    console.log(finalPrice);
 
-    //     if (mapMargin >= 0 && mapMargin < minimumMargin) {
-    //       netPriceResult.sellingPrice =
-    //         numericTotalCost / (1 - minimumMargin / 100);
-    //     } else {
-    //       netPriceResult.sellingPrice = numericMapPrice;
-    //       netPriceResult.marginProfit = Math.max(mapMargin, minimumMargin);
-    //     }
+    //////-------end-----////
 
-    //     if (
-    //       (product.MAP_Price === "" && Dealer_MapPriceCalc === "") ||
-    //       product.MAP_Price === 0 ||
-    //       product.MAP_Price === undefined
-    //     ) {
-    //       netPriceResult.marginProfit = 0;
-    //       netPriceResult.sellingPrice = 0;
-    //     }
-    //   }
-    // } else {
-    //   netPriceResult.sellingPrice =
-    //     numericTotalCost / (1 - minimumMargin / 100);
-    //   netPriceResult.marginProfit = minimumMargin;
-    // }
+    if (finalPrice > 0 && !isAllProductsAvailable) {
+      netPriceResult.sellingPrice = finalPrice;
+      netPriceResult.marginProfit = updatedData.calculatedMargin;
+    } else {
+      // ////////------------------Map Price Based Calculations START--------------------------------////
 
-    if (filteredCompetitions.length > 0) {
-      const firstCompetition = filteredCompetitions[0];
+      const map_price__discount = calculatePrice(
+        Dealer_MapPrice,
+        product.List_Price
+      );
 
-      if (isRoundDown) {
-        if (
-          parseFloat(firstCompetition.compete_RoundedPrice) >
-          parseFloat(netPriceResult.sellingPrice)
-        ) {
-          netPriceResult.sellingPrice = firstCompetition.compete_RoundedPrice;
-          netPriceResult.marginProfit = firstCompetition.lowestMargin;
+      let mapPrice =
+        isAkeneo_MapDiscount === "true"
+          ? product.MAP_Price
+          : map_price__discount;
+
+      const numericTotalCost = parseFloat(netPriceResult.totalCost);
+      if (MAP_Policy === "true") {
+        if (mapPrice) {
+          const numericMapPrice = parseFloat(mapPrice);
+
+          const mapMargin =
+            ((numericMapPrice - numericTotalCost) / numericMapPrice) * 100;
+
+          if (mapMargin >= 0 && mapMargin < margin) {
+            netPriceResult.sellingPrice = numericTotalCost / (1 - margin / 100);
+          } else {
+            netPriceResult.sellingPrice = numericMapPrice;
+            netPriceResult.marginProfit = Math.max(mapMargin, margin);
+          }
+
+          if (
+            (product.MAP_Price === "" && Dealer_MapPriceCalc === "") ||
+            product.MAP_Price === 0 ||
+            product.MAP_Price === undefined
+          ) {
+            netPriceResult.marginProfit = 0;
+            netPriceResult.sellingPrice = 0;
+          }
         }
       } else {
-        if (
-          parseFloat(firstCompetition.compete_lowest_price) >
-          parseFloat(netPriceResult.sellingPrice)
-        ) {
-          netPriceResult.sellingPrice = firstCompetition.compete_lowest_price;
-          netPriceResult.marginProfit = firstCompetition.lowestMargin;
-
-          console.log(netPriceResult.sellingPrice);
-        }
+        netPriceResult.sellingPrice = numericTotalCost / (1 - margin / 100);
+        netPriceResult.marginProfit = margin;
       }
+      // ////////------------------------------ Map Price Based Calculations END--------------------------------///////
+
+      // if (filteredCompetitions.length > 0) {
+      //   const firstCompetition = filteredCompetitions[0];
+
+      //   if (isRoundDown) {
+      //     if (
+      //       parseFloat(firstCompetition.compete_RoundedPrice) >
+      //       parseFloat(netPriceResult.sellingPrice)
+      //     ) {
+      //       netPriceResult.sellingPrice = firstCompetition.compete_RoundedPrice;
+      //       netPriceResult.marginProfit = firstCompetition.lowestMargin;
+      //     }
+      //   } else {
+      //     if (
+      //       parseFloat(firstCompetition.compete_lowest_price) >
+      //       parseFloat(netPriceResult.sellingPrice)
+      //     ) {
+      //       netPriceResult.sellingPrice = firstCompetition.compete_lowest_price;
+      //       netPriceResult.marginProfit = firstCompetition.lowestMargin;
+
+      //       console.log(netPriceResult.sellingPrice);
+      //     }
+      //   }
+      // }
     }
+
+    ////////////-------------END -------------------------///
 
     if (
       (Net_Cost === "" && Dealer_NetCost_Discount === "") ||
